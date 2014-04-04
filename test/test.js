@@ -7,7 +7,7 @@ tape("test-vectorize", function(t) {
 
   var testVectorizer = createExtractor({
     order: [1, 0],
-    vertex: function(x, y, p00, p01, p10, p11, s00, s01, s10, s11) {
+    vertex: function(x, y, z) {
       console.log("got vertex:", x, y)
     },
     phase: function(s) {

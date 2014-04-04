@@ -3,6 +3,7 @@
 var pool = require("typedarray-pool")
 var beautify = require("js-beautify")
 var invert = require("invert-permutation")
+var gray = require("gray-code")
 
 module.exports = createSurfaceExtractor
 
@@ -43,6 +44,9 @@ function step(i,j) {
 function pcube(bitmask) {
   return "b" + bitmask
 }
+function qcube(bitmask) {
+  return "y" + bitmask
+}
 function pdelta(bitmask) {
   return "e" + bitmask
 }
@@ -54,6 +58,22 @@ var PHASES = "P"
 var VERTEX_COUNT = "N"
 var POOL_SIZE = "Q"
 var POINTER = "X"
+var TEMPORARY = "T"
+
+function fixPerm(face, dimension, k) {
+  var seq = gray(dimension-1).map(function(f) {
+    return f.reduce(function(p, x, i) {
+      return p + (x << i)
+    }, 0)
+  })
+  var x = seq.map(function(y) {
+    return face[y]
+  })
+  if(k & 1) {
+    x.reverse()
+  }
+  return x
+}
 
 //Generates the surface procedure
 function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, order, typesig) {
@@ -100,7 +120,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
       vars.push(cube(i,j))
     }
   }
-
   //Create step variables
   for(var i=0; i<arrayArgs; ++i) {
     for(var j=0; j<dimension; ++j) {
@@ -131,19 +150,40 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
   vars.push(pcube(0) + "=0")
   for(var j=1; j<(1<<dimension); ++j) {
     var cubeDelta = []
-    var cubeStep = [ "1" ]
+    var cubeStep = [ ]
     for(var k=dimension-1; k>=0; --k) {
-      if(j & (1<<order[k])) {
-        cubeDelta.push(cubeStep.join("*"))
+      if(j & (1<<k)) {
+        if(cubeStep.length === 0) {
+          cubeDelta.push("1")
+        } else {
+          cubeDelta.push(cubeStep.join("*"))
+        }
       }
       cubeStep.push(shape(order[k]))
     }
-    vars.push(pdelta(j) + "=-(" + cubeDelta.join("+") + ")|0",
+    vars.push(pdelta(j) + "=(-" + cubeDelta.join("-") + ")|0",
               pcube(j) + "=0")
   }
-  for(var i=0; i<(1<<dimension)-1; ++i) {
-    vars.push(vert(i) + "=0")
+  for(var j=1; j<(1<<dimension); ++j) {
+    var cubeDelta = []
+    var cubeStep = [ ]
+    for(var k=dimension-1; k>=0; --k) {
+      if(j & (1<<k)) {
+        if(cubeStep.length === 0) {
+          cubeDelta.push("1")
+        } else {
+          if(k === 0) {
+            cubeDelta.push("-" + cubeStep.join("*"))  
+          } else {
+            cubeDelta.push(cubeStep.join("*"))
+          }
+        }
+      }
+      cubeStep.push(shape(order[k]))
+    }
+    vars.push(qcube(j) + "=-(" + cubeDelta.join("+") + ")|0")
   }
+  vars.push(vert(0) + "=0", TEMPORARY)
 
   function forLoopBegin(i, start) {
     code.push("for(", index(order[i]), "=", start, ";",
@@ -241,20 +281,20 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     code.push("vertex(", vertexArgs.join(), ");",
       vert(0), "=", VERTEX_IDS, "[", POINTER, "]=", VERTEX_COUNT, "++;")
 
-    //TODO: Check face crossing
+    //Check for face crossings
     if(mask < (1<<dimension)-1) {
-      for(var j=1; j<(1<<dimension); ++j) {
-        if((j & mask) === 0) {
-          code.push(vert(j), "=", VERTEX_IDS, "[", POINTER, "+", pcube(j), "];")
-        }
-      }
       var corner = pcube((1<<dimension)-1)
       for(var j=0; j<dimension; ++j) {
-        if(mask & (1<<j)) {
+        if(!(mask & (1<<j))) {
           //Check face
-          var edge = pcube(((1<<dimension)-1)^(1<<j))
-          var faceArgs = []
-
+          var subset = ((1<<dimension)-1)^(1<<j)
+          var edge = pcube(subset)
+          var faceArgs = [ ]
+          for(var k=subset; k>0; k=(k-1)&subset) {
+            faceArgs.push(VERTEX_IDS + "[" + POINTER + "+" + pdelta(k) + "]")
+          }
+          faceArgs.push(vert(0))
+          faceArgs = fixPerm(faceArgs, dimension, j)
           faceArgs.push(corner, edge)
           code.push("if(", corner, "!==", edge, "){",
             "face(", faceArgs.join(), ")}")
@@ -269,6 +309,14 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
       POINTER, "+=1;")
   }
 
+  function flip() {
+    for(var j=1; j<(1<<dimension); ++j) {
+      code.push(TEMPORARY, "=", pcube(j), ";",
+                pcube(j), "=", qcube(j), ";",
+                qcube(j), "=", TEMPORARY, ";")
+    }
+  }
+
   function createLoop(i, mask) {
     if(i < 0) {
       processGridCell(mask)
@@ -280,8 +328,17 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     for(var j=0; j<arrayArgs; ++j) {
       code.push(pointer(j), "+=", step(j,i), ";")
     }
+    if(i === dimension-1) {
+      code.push(POINTER, "=0;")
+      flip()
+    }
     forLoopBegin(i, 2)
     createLoop(i-1, mask)
+    if(i === dimension-1) {
+      code.push("if(", index(order[dimension-1]), "&1){",
+        POINTER, "=0;}")
+      flip()
+    }
     forLoopEnd(i)
     code.push("}")
   }
@@ -348,15 +405,12 @@ function createSurfaceExtractor(args) {
   }
   var getters = args.getters || []
   var typesig = new Array(arrays)
-  console.log(getters)
   for(var i=0; i<arrays; ++i) {
-    console.log("here1")
     if(getters.indexOf(i) >= 0) {
       typesig[i] = true
     } else {
       typesig[i] = false
     }
-    console.log("here2")
   }
   return compileSurfaceProcedure(
     args.vertex,

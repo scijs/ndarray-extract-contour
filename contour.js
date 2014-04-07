@@ -1,8 +1,9 @@
 "use strict"
 
+//DEBUG
+//var beautify = require("js-beautify")
+
 var pool = require("typedarray-pool")
-var beautify = require("js-beautify")
-var invert = require("invert-permutation")
 var gray = require("gray-code")
 
 module.exports = createSurfaceExtractor
@@ -300,8 +301,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
             "face(", faceArgs.join(), ")}")
         }
       }
-
-      code.push("/*" + mask + "*/")
     }
 
     //Increment pointer, close off if statement
@@ -397,8 +396,8 @@ function createSurfaceExtractor(args) {
   if(typeof args.vertex !== "function") {
     error("Must specify vertex creation function")
   }
-  if(typeof args.face !== "function") {
-    error("Must specify face creation function")
+  if(typeof args.cell !== "function") {
+    error("Must specify cell creation function")
   }
   if(typeof args.phase !== "function") {
     error("Must specify phase function")
@@ -414,7 +413,7 @@ function createSurfaceExtractor(args) {
   }
   return compileSurfaceProcedure(
     args.vertex,
-    args.face,
+    args.cell,
     args.phase,
     scalars,
     order,

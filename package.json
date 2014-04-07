@@ -14,7 +14,7 @@
   "devDependencies": {
     "tape": "~2.12.2",
     "js-beautify": "~1.4.2",
-    "ndarray-pack": "~1.0.1",
+    "ndarray-pack": "~1.0.1"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

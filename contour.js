@@ -1,10 +1,11 @@
 "use strict"
 
 //DEBUG
-//var beautify = require("js-beautify")
+var beautify = require("js-beautify")
 
 var pool = require("typedarray-pool")
 var gray = require("gray-code")
+var invert = require("invert-permutation")
 
 module.exports = createSurfaceExtractor
 
@@ -76,10 +77,25 @@ function fixPerm(face, dimension, k) {
   return x
 }
 
+function permBitmask(dimension, mask, order) {
+  var r = 0
+  for(var i=0; i<dimension; ++i) {
+    if(mask & (1<<i)) {
+      r |= (1<<order[i])
+    }
+  }
+  return r
+}
+
 //Generates the surface procedure
 function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, order, typesig) {
   var arrayArgs = typesig.length
   var dimension = order.length
+  var invOrder = invert(order)
+
+  if(dimension < 2) {
+    throw new Error("ndarray-extract-contour: Dimension must be at least 2")
+  }
 
   var funcName = "extractContour" + order.join("_")
   var code = []
@@ -126,7 +142,7 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     for(var j=0; j<dimension; ++j) {
       var stepVal = [ stride(i,order[j]) ]
       for(var k=j-1; k>=0; --k) {
-        stepVal.push(stride(i, order[k]) + "*" + shape(order[k]))
+        stepVal.push(stride(i, order[k]) + "*" + shape(order[k]) )
       }
       vars.push(step(i,order[j]) + "=(" + stepVal.join("-") + ")|0")
     }
@@ -152,37 +168,24 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
   for(var j=1; j<(1<<dimension); ++j) {
     var cubeDelta = []
     var cubeStep = [ ]
-    for(var k=dimension-1; k>=0; --k) {
+    for(var k=0; k<dimension; ++k) {
       if(j & (1<<k)) {
         if(cubeStep.length === 0) {
           cubeDelta.push("1")
         } else {
-          cubeDelta.push(cubeStep.join("*"))
+          cubeDelta.unshift(cubeStep.join("*"))
         }
       }
       cubeStep.push(shape(order[k]))
     }
-    vars.push(pdelta(j) + "=(-" + cubeDelta.join("-") + ")|0",
-              pcube(j) + "=0")
-  }
-  for(var j=1; j<(1<<dimension); ++j) {
-    var cubeDelta = []
-    var cubeStep = [ ]
-    for(var k=dimension-1; k>=0; --k) {
-      if(j & (1<<k)) {
-        if(cubeStep.length === 0) {
-          cubeDelta.push("1")
-        } else {
-          if(k === 0) {
-            cubeDelta.push("-" + cubeStep.join("*"))  
-          } else {
-            cubeDelta.push(cubeStep.join("*"))
-          }
-        }
-      }
-      cubeStep.push(shape(order[k]))
+    var signFlag = ""
+    if(cubeDelta[0].indexOf(shape(order[dimension-2])) < 0) {
+      signFlag = "-"
     }
-    vars.push(qcube(j) + "=-(" + cubeDelta.join("+") + ")|0")
+    var jperm = permBitmask(dimension, j, order)
+    vars.push(pdelta(jperm) + "=(-" + cubeDelta.join("-") + ")|0",
+              qcube(jperm) + "=(" + signFlag + cubeDelta.join("-") + ")|0",
+              pcube(jperm) + "=0")
   }
   vars.push(vert(0) + "=0", TEMPORARY)
 
@@ -211,9 +214,11 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
         phaseFuncArgs.push(data(i) + "[" + pointer(i) + "]")
       }
     }
-    for(var i=0; j<scalarArgs; ++i) {
+    for(var i=0; i<scalarArgs; ++i) {
       phaseFuncArgs.push(scalar(i))
     }
+    //code.push("console.log('o',p0,X,e1,e2,e3);")
+    
     code.push(PHASES, "[", POINTER, "++]=phase(", phaseFuncArgs.join(), ");")
     for(var i=0; i<k; ++i) {
       forLoopEnd(i)
@@ -238,9 +243,11 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     for(var i=0; i<arrayArgs; ++i) {
       phaseFuncArgs.push(cube(i,0))
     }
-    for(var i=0; j<scalarArgs; ++i) {
+    for(var i=0; i<scalarArgs; ++i) {
       phaseFuncArgs.push(scalar(i))
     }
+    //code.push("console.log(p0,X,e1,e2,e3);")
+    
     code.push(pcube(0), "=", PHASES, "[", POINTER, "]=phase(", phaseFuncArgs.join(), ");")
     
     //Read in other cube data
@@ -271,38 +278,45 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
         vertexArgs.push(cube(i,j))
       }
     }
-    for(var i=0; i<scalarArgs; ++i) {
-      vertexArgs.push(scalar(i))
-    }
     for(var i=0; i<(1<<dimension); ++i) {
       vertexArgs.push(pcube(i))
     }
+    for(var i=0; i<scalarArgs; ++i) {
+      vertexArgs.push(scalar(i))
+    }
 
     //Generate vertex
+    code.push("console.log('callv:',i0,i1,N,X,p0,e1,e2,e3,d0_1,d0_2,d0_3);")
     code.push("vertex(", vertexArgs.join(), ");",
       vert(0), "=", VERTEX_IDS, "[", POINTER, "]=", VERTEX_COUNT, "++;")
 
     //Check for face crossings
-    if(mask < (1<<dimension)-1) {
-      var corner = pcube((1<<dimension)-1)
-      for(var j=0; j<dimension; ++j) {
-        if(!(mask & (1<<j))) {
-          //Check face
-          var subset = ((1<<dimension)-1)^(1<<j)
-          var edge = pcube(subset)
-          var faceArgs = [ ]
-          for(var k=subset; k>0; k=(k-1)&subset) {
-            faceArgs.push(VERTEX_IDS + "[" + POINTER + "+" + pdelta(k) + "]")
-          }
-          faceArgs.push(vert(0))
-          faceArgs = fixPerm(faceArgs, dimension, j)
-          faceArgs.push(corner, edge)
-          code.push("if(", corner, "!==", edge, "){",
-            "face(", faceArgs.join(), ")}")
+    var base = (1<<dimension)-1
+    var corner = pcube(base)
+    for(var j=0; j<dimension; ++j) {
+      if((mask & ~(1<<j))===0) {
+        //Check face
+        var subset = base^(1<<j)
+        var edge = pcube(subset)
+        var faceArgs = [ ]
+        for(var k=subset; k>0; k=(k-1)&subset) {
+          faceArgs.push(VERTEX_IDS + "[" + POINTER + "+" + pdelta(k) + "]")
         }
+        faceArgs.push(vert(0))
+        faceArgs = fixPerm(faceArgs, dimension, j)
+        for(var k=0; k<arrayArgs; ++k) {
+          faceArgs.push(cube(k,base), cube(k,subset))
+        }
+        faceArgs.push(corner, edge)
+        for(var k=0; k<scalarArgs; ++k) {
+          faceArgs.push(scalar(k))
+        }
+        code.push("if(", corner, "!==", edge, "){",
+          "console.log('face', i0,i1, ",j,",",mask,");",
+          "face(", faceArgs.join(), ")}")
       }
     }
-
+    
     //Increment pointer, close off if statement
     code.push("}",
       POINTER, "+=1;")
@@ -310,8 +324,8 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
 
   function flip() {
     for(var j=1; j<(1<<dimension); ++j) {
-      code.push(TEMPORARY, "=", pcube(j), ";",
-                pcube(j), "=", qcube(j), ";",
+      code.push(TEMPORARY, "=", pdelta(j), ";",
+                pdelta(j), "=", qcube(j), ";",
                 qcube(j), "=", TEMPORARY, ";")
     }
   }
@@ -322,10 +336,12 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
       return
     }
     fillEmptySlice(i)
-    code.push("if(", shape(order[i]), ">0){")
-    createLoop(i-1, mask|(1<<i))
+    code.push("if(", shape(order[i]), ">0){",
+      index(order[i]), "=1;")
+    createLoop(i-1, mask|(1<<order[i]))
+
     for(var j=0; j<arrayArgs; ++j) {
-      code.push(pointer(j), "+=", step(j,i), ";")
+      code.push(pointer(j), "+=", step(j,order[i]), ";")
     }
     if(i === dimension-1) {
       code.push(POINTER, "=0;")

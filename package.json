@@ -1,14 +1,12 @@
 {
   "name": "ndarray-extract-contour",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Generic contour extraction library for surface nets/dual contouring",
   "main": "contour.js",
   "directories": {
     "test": "test"
   },
   "dependencies": {
-    "gray-code": "^0.0.0",
-    "invert-permutation": "^0.1.0",
     "typedarray-pool": "^1.0.0"
   },
   "devDependencies": {

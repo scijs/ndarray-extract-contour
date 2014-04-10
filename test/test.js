@@ -12,19 +12,22 @@ tape("test-vectorize", function(t) {
   var testVectorizer = createExtractor({
     order: [1, 0],
     vertex: function(x, y) {
-      console.log("v:", x,y)
+      verts.push([x,y])
     },
     phase: function(s) {
-      return s < 0
+      console.log(s)
+      return s
     },
     cell: function(i, j, p0, p1) {
-      console.log("f:", i,j, p0, p1p1)
+      cells.push([i,j,p0,p1])
     }
   })
+  console.log(verts, cells)
 
   testVectorizer(pack(
-    [ [0,1,0],
-      [1,1,1,],
-      [0,1,0]]))
+    [ [0,1,0,0],
+      [0,1,1,1],
+      [1,1,1,0],
+      [0,0,1,0] ] ))
   t.end()
 })

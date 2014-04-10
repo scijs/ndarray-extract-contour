@@ -1,11 +1,6 @@
 "use strict"
 
-//DEBUG
-var beautify = require("js-beautify")
-
 var pool = require("typedarray-pool")
-var gray = require("gray-code")
-var invert = require("invert-permutation")
 
 module.exports = createSurfaceExtractor
 
@@ -62,21 +57,6 @@ var POOL_SIZE = "Q"
 var POINTER = "X"
 var TEMPORARY = "T"
 
-function fixPerm(face, dimension, k) {
-  var seq = gray(dimension-1).map(function(f) {
-    return f.reduce(function(p, x, i) {
-      return p + (x << i)
-    }, 0)
-  })
-  var x = seq.map(function(y) {
-    return face[y]
-  })
-  if(k & 1) {
-    x.reverse()
-  }
-  return x
-}
-
 function permBitmask(dimension, mask, order) {
   var r = 0
   for(var i=0; i<dimension; ++i) {
@@ -91,7 +71,6 @@ function permBitmask(dimension, mask, order) {
 function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, order, typesig) {
   var arrayArgs = typesig.length
   var dimension = order.length
-  var invOrder = invert(order)
 
   if(dimension < 2) {
     throw new Error("ndarray-extract-contour: Dimension must be at least 2")
@@ -141,8 +120,8 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
   for(var i=0; i<arrayArgs; ++i) {
     for(var j=0; j<dimension; ++j) {
       var stepVal = [ stride(i,order[j]) ]
-      for(var k=j-1; k>=0; --k) {
-        stepVal.push(stride(i, order[k]) + "*" + shape(order[k]) )
+      if(j > 0) {
+        stepVal.push(stride(i, order[j-1]) + "*" + shape(order[j-1]) )
       }
       vars.push(step(i,order[j]) + "=(" + stepVal.join("-") + ")|0")
     }
@@ -217,8 +196,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     for(var i=0; i<scalarArgs; ++i) {
       phaseFuncArgs.push(scalar(i))
     }
-    //code.push("console.log('o',p0,X,e1,e2,e3);")
-    
     code.push(PHASES, "[", POINTER, "++]=phase(", phaseFuncArgs.join(), ");")
     for(var i=0; i<k; ++i) {
       forLoopEnd(i)
@@ -246,7 +223,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     for(var i=0; i<scalarArgs; ++i) {
       phaseFuncArgs.push(scalar(i))
     }
-    //code.push("console.log(p0,X,e1,e2,e3);")
     
     code.push(pcube(0), "=", PHASES, "[", POINTER, "]=phase(", phaseFuncArgs.join(), ");")
     
@@ -286,7 +262,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
     }
 
     //Generate vertex
-    code.push("console.log('callv:',i0,i1,N,X,p0,e1,e2,e3,d0_1,d0_2,d0_3);")
     code.push("vertex(", vertexArgs.join(), ");",
       vert(0), "=", VERTEX_IDS, "[", POINTER, "]=", VERTEX_COUNT, "++;")
 
@@ -303,16 +278,22 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
           faceArgs.push(VERTEX_IDS + "[" + POINTER + "+" + pdelta(k) + "]")
         }
         faceArgs.push(vert(0))
-        faceArgs = fixPerm(faceArgs, dimension, j)
         for(var k=0; k<arrayArgs; ++k) {
-          faceArgs.push(cube(k,base), cube(k,subset))
+          if(j&1) {
+            faceArgs.push(cube(k,base), cube(k,subset))
+          } else {
+            faceArgs.push(cube(k,subset), cube(k,base))
+          }
         }
-        faceArgs.push(corner, edge)
+        if(j&1) {
+          faceArgs.push(corner, edge)
+        } else {
+          faceArgs.push(edge, corner)
+        }
         for(var k=0; k<scalarArgs; ++k) {
           faceArgs.push(scalar(k))
         }
         code.push("if(", corner, "!==", edge, "){",
-          "console.log('face', i0,i1, ",j,",",mask,");",
           "face(", faceArgs.join(), ")}")
       }
     }
@@ -371,9 +352,6 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
       code.join(""),
     "}",
     "return ", funcName ].join("")
-
-  //Print code
-  console.log(beautify(procedureCode))
 
   var proc = new Function(
     "vertex", 

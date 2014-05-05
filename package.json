@@ -1,6 +1,6 @@
 {
   "name": "ndarray-extract-contour",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Generic contour extraction library for surface nets/dual contouring",
   "main": "contour.js",
   "directories": {

@@ -96,7 +96,7 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
   //Data, stride, offset pointers
   for(var i=0; i<arrayArgs; ++i) {
     vars.push(data(i) + "=" + array(i) + ".data",
-              offset(i) + "=" + array(i) + ".offset")
+              offset(i) + "=" + array(i) + ".offset|0")
     for(var j=0; j<dimension; ++j) {
       vars.push(stride(i,j) + "=" + array(i) + ".stride[" + j + "]|0")
     }
@@ -112,8 +112,8 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
           ptrStr.push("-" + stride(i,k))
         }
       }
-      vars.push(delta(i,j) + "=" + ptrStr.join(""))
-      vars.push(cube(i,j))
+      vars.push(delta(i,j) + "=(" + ptrStr.join("") + ")|0")
+      vars.push(cube(i,j) + "=0")
     }
   }
   //Create step variables
@@ -166,7 +166,7 @@ function compileSurfaceProcedure(vertexFunc, faceFunc, phaseFunc, scalarArgs, or
               qcube(jperm) + "=(" + signFlag + cubeDelta.join("-") + ")|0",
               pcube(jperm) + "=0")
   }
-  vars.push(vert(0) + "=0", TEMPORARY)
+  vars.push(vert(0) + "=0", TEMPORARY + "=0")
 
   function forLoopBegin(i, start) {
     code.push("for(", index(order[i]), "=", start, ";",
